@@ -52,14 +52,15 @@ It will generate the following 3 files in $repo/exp
 Note: Even though this script only supports decoding a single file,
 the exported ONNX models do support batch processing.
 """
-
+try:
+    from tpu_mlir.python import *
+except ImportError:
+    pass
+from tools.model_runner import mlir_inference, model_inference
+from utils.preprocess import supported_customization_format
 import argparse
-import logging
 from typing import Dict, List, Optional, Tuple
-
-import k2
 import numpy as np
-import onnxruntime as ort
 import torch
 import torchaudio
 from kaldifeat import FbankOptions, OnlineFbank, OnlineFeature
@@ -109,34 +110,25 @@ def get_parser():
     return parser
 
 
-class OnnxModel:
+class CviModel:
     def __init__(
         self,
         encoder_model_filename: str,
         decoder_model_filename: str,
         joiner_model_filename: str,
     ):
-        session_opts = ort.SessionOptions()
-        session_opts.inter_op_num_threads = 1
-        session_opts.intra_op_num_threads = 1
-
-        self.session_opts = session_opts
 
         self.init_encoder(encoder_model_filename)
         self.init_decoder(decoder_model_filename)
         self.init_joiner(joiner_model_filename)
 
     def init_encoder(self, encoder_model_filename: str):
-        self.encoder = ort.InferenceSession(
-            encoder_model_filename,
-            sess_options=self.session_opts,
-            providers=["CPUExecutionProvider"],
-        )
+        self.encoder = encoder_model_filename
         self.init_encoder_states()
 
     def init_encoder_states(self, batch_size: int = 1):
-        encoder_meta = self.encoder.get_modelmeta().custom_metadata_map
-        # print(encoder_meta) # by ltz
+        encoder_meta = {'cnn_module_kernels': '31,31,31,31,31', 'attention_dims': '192,192,192,192,192', 'encoder_dims': '384,384,384,384,384', 'left_context_len': '64,32,16,8,32', 'num_encoder_layers': '2,4,3,2,4', 'T': '39', 'decode_chunk_len': '32', 'version': '1', 'model_author': 'k2-fsa', 'model_type': 'zipformer'}
+
         model_type = encoder_meta["model_type"]
         assert model_type == "zipformer", model_type
 
@@ -158,13 +150,13 @@ class OnnxModel:
         cnn_module_kernels = to_int_list(cnn_module_kernels)
         left_context_len = to_int_list(left_context_len)
 
-        logging.info(f"decode_chunk_len: {decode_chunk_len}")
-        logging.info(f"T: {T}")
-        logging.info(f"num_encoder_layers: {num_encoder_layers}")
-        logging.info(f"encoder_dims: {encoder_dims}")
-        logging.info(f"attention_dims: {attention_dims}")
-        logging.info(f"cnn_module_kernels: {cnn_module_kernels}")
-        logging.info(f"left_context_len: {left_context_len}")
+        print(f"decode_chunk_len: {decode_chunk_len}")
+        print(f"T: {T}")
+        print(f"num_encoder_layers: {num_encoder_layers}")
+        print(f"encoder_dims: {encoder_dims}")
+        print(f"attention_dims: {attention_dims}")
+        print(f"cnn_module_kernels: {cnn_module_kernels}")
+        print(f"left_context_len: {left_context_len}")
 
         num_encoders = len(num_encoder_layers)
 
@@ -227,39 +219,29 @@ class OnnxModel:
         self.offset = decode_chunk_len
 
     def init_decoder(self, decoder_model_filename: str):
-        self.decoder = ort.InferenceSession(
-            decoder_model_filename,
-            sess_options=self.session_opts,
-            providers=["CPUExecutionProvider"],
-        )
+        self.decoder = decoder_model_filename
 
-        decoder_meta = self.decoder.get_modelmeta().custom_metadata_map
-        # print(decoder_meta)
+        decoder_meta = {'vocab_size': '6254', 'context_size': '2'}
         self.context_size = int(decoder_meta["context_size"])
         self.vocab_size = int(decoder_meta["vocab_size"])
 
-        logging.info(f"context_size: {self.context_size}")
-        logging.info(f"vocab_size: {self.vocab_size}")
+        print(f"context_size: {self.context_size}")
+        print(f"vocab_size: {self.vocab_size}")
 
     def init_joiner(self, joiner_model_filename: str):
-        self.joiner = ort.InferenceSession(
-            joiner_model_filename,
-            sess_options=self.session_opts,
-            providers=["CPUExecutionProvider"],
-        )
+        self.joiner = joiner_model_filename
 
-        joiner_meta = self.joiner.get_modelmeta().custom_metadata_map
-        # print(joiner_meta)
+        joiner_meta = {'joiner_dim': '512'}
         self.joiner_dim = int(joiner_meta["joiner_dim"])
 
-        logging.info(f"joiner_dim: {self.joiner_dim}")
+        print(f"joiner_dim: {self.joiner_dim}")
 
     def _build_encoder_input_output(
         self,
         x: torch.Tensor,
     ) -> Tuple[Dict[str, np.ndarray], List[str]]:
         encoder_input = {"x": x.numpy()}
-        encoder_output = ["encoder_out"]
+        encoder_output = ["encoder_out_Add_f32"]
 
         def build_states_input(states: List[torch.Tensor], name: str):
             for i, s in enumerate(states):
@@ -268,7 +250,7 @@ class OnnxModel:
                 else:
                     encoder_input[f"{name}_{i}"] = s
 
-                encoder_output.append(f"new_{name}_{i}")
+                encoder_output.append(f"new_{name}_{i}_Concat_f32")
 
         build_states_input(self.cached_len, "cached_len")
         build_states_input(self.cached_avg, "cached_avg")
@@ -301,16 +283,14 @@ class OnnxModel:
           T' is usually equal to ((T-7)//2+1)//2
         """
         encoder_input, encoder_output_names = self._build_encoder_input_output(x)
-        # debug by ltz
-        # for k,v in encoder_input.items():
-        #     print(k,v.shape,v.dtype)
+        out = model_inference(encoder_input, self.encoder, False)
+        # convert dict to list
+        out_L = [out[v] for v in encoder_output_names]
         # print(encoder_output_names)
-        # debug end
-        out = self.encoder.run(encoder_output_names, encoder_input)
+        # print(out.keys())
+        self._update_states(out_L[1:])
 
-        self._update_states(out[1:])
-
-        return torch.from_numpy(out[0])
+        return torch.from_numpy(out_L[0])
 
     def run_decoder(self, decoder_input: torch.Tensor) -> torch.Tensor:
         """
@@ -320,12 +300,9 @@ class OnnxModel:
         Returns:
           Return a 2-D tensor of shape (N, joiner_dim)
         """
-        out = self.decoder.run(
-            [self.decoder.get_outputs()[0].name],
-            {self.decoder.get_inputs()[0].name: decoder_input.numpy()},
-        )[0]
+        out = model_inference({'y':decoder_input.numpy().astype(np.uint16)}, self.decoder, False)
 
-        return torch.from_numpy(out)
+        return torch.from_numpy(out['decoder_out_Gemm_f32'])
 
     def run_joiner(
         self, encoder_out: torch.Tensor, decoder_out: torch.Tensor
@@ -339,15 +316,9 @@ class OnnxModel:
         Returns:
           Return a 2-D tensor of shape (N, vocab_size)
         """
-        out = self.joiner.run(
-            [self.joiner.get_outputs()[0].name],
-            {
-                self.joiner.get_inputs()[0].name: encoder_out.numpy(),
-                self.joiner.get_inputs()[1].name: decoder_out.numpy(),
-            },
-        )[0]
+        out = model_inference({'encoder_out':encoder_out.numpy(), 'decoder_out':decoder_out.numpy()}, self.joiner, False)
 
-        return torch.from_numpy(out)
+        return torch.from_numpy(out['logit_Gemm_f32'])
 
 
 def read_sound_files(
@@ -394,7 +365,7 @@ def create_streaming_feature_extractor() -> OnlineFeature:
 
 
 def greedy_search(
-    model: OnnxModel,
+    model: CviModel,
     encoder_out: torch.Tensor,
     context_size: int,
     decoder_out: Optional[torch.Tensor] = None,
@@ -439,15 +410,27 @@ def greedy_search(
             decoder_out = model.run_decoder(decoder_input)
 
     return hyp, decoder_out
+def tokens_fromfile(filename: str) -> Dict[int, str]:
+    ans = {}
+    with open(filename, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            fields = line.split()
+            assert len(fields) == 2, fields
+            idx = int(fields[1])
+            token = fields[0]
+            ans[idx] = token
+    return ans
 
-
-@torch.no_grad()
+# @torch.no_grad()
 def main():
     parser = get_parser()
     args = parser.parse_args()
-    logging.info(vars(args))
+    print(vars(args))
 
-    model = OnnxModel(
+    model = CviModel(
         encoder_model_filename=args.encoder_model_filename,
         decoder_model_filename=args.decoder_model_filename,
         joiner_model_filename=args.joiner_model_filename,
@@ -455,10 +438,10 @@ def main():
 
     sample_rate = 16000
 
-    logging.info("Constructing Fbank computer")
+    print("Constructing Fbank computer")
     online_fbank = create_streaming_feature_extractor()
 
-    logging.info(f"Reading sound files: {args.sound_file}")
+    print(f"Reading sound files: {args.sound_file}")
     waves = read_sound_files(
         filenames=[args.sound_file],
         expected_sample_rate=sample_rate,
@@ -503,21 +486,21 @@ def main():
                 hyp,
             )
 
-    symbol_table = k2.SymbolTable.from_file(args.tokens)
+    symbol_table = tokens_fromfile(args.tokens)
 
     text = ""
     for i in hyp[context_size:]:
         text += symbol_table[i]
     text = text.replace("▁", " ").strip()
 
-    logging.info(args.sound_file)
-    logging.info(text)
+    print(args.sound_file)
+    print(text)
 
-    logging.info("Decoding Done")
+    print("Decoding Done")
 
 
 if __name__ == "__main__":
     formatter = "%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s"
 
-    logging.basicConfig(format=formatter, level=logging.INFO)
+    # logging.basicConfig(format=formatter, level=print)
     main()
