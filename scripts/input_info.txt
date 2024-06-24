@@ -1,0 +1,36 @@
+x (1, 39, 80) float32
+cached_len_0 (2, 1) int64
+cached_len_1 (4, 1) int64
+cached_len_2 (3, 1) int64
+cached_len_3 (2, 1) int64
+cached_len_4 (4, 1) int64
+cached_avg_0 (2, 1, 384) float32
+cached_avg_1 (4, 1, 384) float32
+cached_avg_2 (3, 1, 384) float32
+cached_avg_3 (2, 1, 384) float32
+cached_avg_4 (4, 1, 384) float32
+cached_key_0 (2, 64, 1, 192) float32
+cached_key_1 (4, 32, 1, 192) float32
+cached_key_2 (3, 16, 1, 192) float32
+cached_key_3 (2, 8, 1, 192) float32
+cached_key_4 (4, 32, 1, 192) float32
+cached_val_0 (2, 64, 1, 96) float32
+cached_val_1 (4, 32, 1, 96) float32
+cached_val_2 (3, 16, 1, 96) float32
+cached_val_3 (2, 8, 1, 96) float32
+cached_val_4 (4, 32, 1, 96) float32
+cached_val2_0 (2, 64, 1, 96) float32
+cached_val2_1 (4, 32, 1, 96) float32
+cached_val2_2 (3, 16, 1, 96) float32
+cached_val2_3 (2, 8, 1, 96) float32
+cached_val2_4 (4, 32, 1, 96) float32
+cached_conv1_0 (2, 1, 384, 30) float32
+cached_conv1_1 (4, 1, 384, 30) float32
+cached_conv1_2 (3, 1, 384, 30) float32
+cached_conv1_3 (2, 1, 384, 30) float32
+cached_conv1_4 (4, 1, 384, 30) float32
+cached_conv2_0 (2, 1, 384, 30) float32
+cached_conv2_1 (4, 1, 384, 30) float32
+cached_conv2_2 (3, 1, 384, 30) float32
+cached_conv2_3 (2, 1, 384, 30) float32
+cached_conv2_4 (4, 1, 384, 30) float32

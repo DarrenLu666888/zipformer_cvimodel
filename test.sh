@@ -1,0 +1,1 @@
+python onnx_pretrained.py --encoder-model-filename encoder-epoch-99-avg-1.onnx --decoder-model-filename decoder-epoch-99-avg-1.onnx --joiner-model-filename joiner-epoch-99-avg-1.onnx --tokens tokens.txt ./test_wavs/0.wav
